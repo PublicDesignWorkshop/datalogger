@@ -15,7 +15,7 @@ const int chipSelect = 4;
 const int timePin = 8;   // RTC select pin
 RTC_DS3234 RTC(timePin); 
 
-uint8_t sleep_period = 1;   // the sleep interval in hours between 2 consecutive alarms
+uint8_t sleep_hour = 1;   // the sleep interval in hours between 2 consecutive alarms
 
 Energy energy;
 int time_interrupt=0;
@@ -43,8 +43,7 @@ void DS3234_set_addr(const uint8_t pin, const uint8_t addr, const uint8_t val){
     digitalWrite(pin, HIGH);
 }
 
-uint8_t DS3234_get_addr(const uint8_t pin, const uint8_t addr)
-{
+uint8_t DS3234_get_addr(const uint8_t pin, const uint8_t addr){
     uint8_t rv;
 
     digitalWrite(pin, LOW);
@@ -74,20 +73,17 @@ void DS3234_set_a2(const uint8_t pin, const uint8_t mi, const uint8_t h, const u
     }
 }
 
-void DS3234_set_sreg(const uint8_t pin, const uint8_t sreg)
-{
+void DS3234_set_sreg(const uint8_t pin, const uint8_t sreg){
     DS3234_set_addr(pin, 0x8F, sreg);
 }
 
-uint8_t DS3234_get_sreg(const uint8_t pin)
-{
+uint8_t DS3234_get_sreg(const uint8_t pin){
     uint8_t rv;
     rv = DS3234_get_addr(pin, 0x0f);
     return rv;
 }
 
-void DS3234_clear_a2f(const uint8_t pin)
-{
+void DS3234_clear_a2f(const uint8_t pin){
     uint8_t reg_val;
 
     reg_val = DS3234_get_sreg(pin) & ~DS3234_A2F;
@@ -97,19 +93,17 @@ void DS3234_clear_a2f(const uint8_t pin)
 // END WEIRD FUNCTION DUMP
 //////////////////////////////////////////////////////
 
-void set_next_alarm(void)
-{
+void set_next_alarm(void){
   
     DateTime now = RTC.now();
     unsigned char wakeup_min;
     unsigned char wakeup_hour;
     
-
     // calculate the minute when the next alarm will be triggered
     wakeup_min = now.minute();
 
     //calculate the hour when the next alarm will be triggered
-    wakeup_hour = now.hour() + sleep_period;
+    wakeup_hour = now.hour() + sleep_hour;
     if (wakeup_hour > 23) {
         wakeup_hour -= 24;
     }
@@ -126,17 +120,14 @@ void set_next_alarm(void)
     DS3234_set_a2(timePin, wakeup_min, wakeup_hour, 0, flags);
 
     // activate Alarm2
-    DS3234_set_creg(timePin, DS3234_INTCN | DS3234_A2IE);
-    
+    DS3234_set_creg(timePin, DS3234_INTCN | DS3234_A2IE);  
 }
 
-void INT0_ISR(void)
-{
+void INT0_ISR(void){
   //detach interrupt and set time_interrupt=1
   //interrupt must be attached again
   detachInterrupt(0);
   time_interrupt=1;
-
 }
 
 void logSensorReading() {
@@ -172,8 +163,7 @@ void logSensorReading() {
   }
 }
 
-void setup()
-{
+void setup(){
     Serial.begin(9600);
     Serial.println("Entering setup");
 
@@ -197,9 +187,7 @@ void setup()
     attachInterrupt(0, INT0_ISR, LOW);
 }
 
-
-void loop()
-{
+void loop(){
   if(time_interrupt==1){
     Serial.println(" time_interrupt==1");
     time_interrupt=0;
@@ -229,5 +217,4 @@ void loop()
 
   Serial.println("Powering down");
   energy.PowerDown();
-
 }
