@@ -1,21 +1,21 @@
 #include <SPI.h>
 
-#include <SD.h>       //For SD
+#include <SD.h>           //For SD
 #include <Wire.h>
 
 #include <RTClib.h>
 #include <RTC_DS3234.h>
 
-#include "Enerlib.h"  //for Power management
+#include "Enerlib.h"      //for Power management
 
 #define BUFF_MAX 256
 
 const int chipSelect = 4;
 
-const int timePin = 8;   // RTC select pin
+const int timePin = 8;    // RTC select pin
 RTC_DS3234 RTC(timePin); 
 
-uint8_t sleep_hour = 1;   // the sleep interval in hours between 2 consecutive alarms
+uint8_t sleep_hour = 12;   // the sleep interval in hours between 2 consecutive alarms
 
 Energy energy;
 int time_interrupt=0;
