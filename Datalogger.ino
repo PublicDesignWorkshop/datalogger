@@ -1,55 +1,142 @@
-
 #include <SPI.h>
-#include <SD.h>
+
+#include <SD.h>       //For SD
 #include <Wire.h>
+
 #include <RTClib.h>
 #include <RTC_DS3234.h>
 
-#include <avr/sleep.h>
-#include <avr/power.h>
-#include <avr/wdt.h>
+#include "Enerlib.h"  //for Power management
+
+#define BUFF_MAX 256
 
 const int chipSelect = 4;
 
-// Create an RTC instance, using the chip select pin it's connected to
-RTC_DS3234 RTC(8);
+const int timePin = 8;   // RTC select pin
+RTC_DS3234 RTC(timePin); 
 
-// Data logging configuration.
-#define LOGGING_FREQ_SECONDS   21600       // Seconds to wait before a new sensor reading is logged.
+uint8_t sleep_period = 1;   // the sleep interval in hours between 2 consecutive alarms
 
-#define MAX_SLEEP_ITERATIONS   LOGGING_FREQ_SECONDS / 8  // Number of times to sleep (for 8 seconds) before
-                                                         // a sensor reading is taken and sent to the server.
-                                                         // Don't change this unless you also change the 
-                                                         // watchdog timer configuration.
+Energy energy;
+int time_interrupt=0;
 
-int sleepIterations = 0;
-uint32_t ip;
-volatile bool watchdogActivated = false;
+//////////////////////////////////////////////////////
+////FUNCTIONS FROM OTHER RTC LIBRARY TO CLEAN UP
+// control register bits
+#define DS3234_A1IE     0x1
+#define DS3234_A2IE     0x2
+#define DS3234_INTCN    0x4
 
-ISR(WDT_vect){
-  // Set the watchdog activated flag.
-  // Note that you shouldn't do much work inside an interrupt handler.
-  watchdogActivated = true;
+// status register bits
+#define DS3234_A1F      0x1
+#define DS3234_A2F      0x2
+#define DS3234_OSF      0x80
+
+uint8_t dectobcd(const uint8_t val){
+    return ((val / 10 * 16) + (val % 10));
 }
 
-// Put the Arduino to sleep.
-void sleep(){
-  // Set sleep to full power down.  Only external interrupts or 
-  // the watchdog timer can wake the CPU!
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+void DS3234_set_addr(const uint8_t pin, const uint8_t addr, const uint8_t val){
+    digitalWrite(pin, LOW);
+    SPI.transfer(addr);
+    SPI.transfer(val);
+    digitalWrite(pin, HIGH);
+}
 
-  // Turn off the ADC while asleep.
-  power_adc_disable();
+uint8_t DS3234_get_addr(const uint8_t pin, const uint8_t addr)
+{
+    uint8_t rv;
 
-  // Enable sleep and enter sleep mode.
-  sleep_mode();
+    digitalWrite(pin, LOW);
+    SPI.transfer(addr);
+    rv = SPI.transfer(0x00);
+    digitalWrite(pin, HIGH);
+    return rv;
+}
 
-  // CPU is now asleep and program execution completely halts!
-  // Once awake, execution will resume at this point.
+void DS3234_set_creg(const uint8_t pin, const uint8_t val){
+    DS3234_set_addr(pin, 0x8E, val);
+}
+
+void DS3234_set_a2(const uint8_t pin, const uint8_t mi, const uint8_t h, const uint8_t d,
+                   const uint8_t * flags){
+    uint8_t t[3] = { mi, h, d };
+    uint8_t i;
+
+    for (i = 0; i <= 2; i++) {
+        digitalWrite(pin, LOW);
+        SPI.transfer(i + 0x8B);
+        if (i == 2) {
+            SPI.transfer(dectobcd(t[2]) | (flags[2] << 7) | (flags[3] << 6));
+        } else
+            SPI.transfer(dectobcd(t[i]) | (flags[i] << 7));
+        digitalWrite(pin, HIGH);
+    }
+}
+
+void DS3234_set_sreg(const uint8_t pin, const uint8_t sreg)
+{
+    DS3234_set_addr(pin, 0x8F, sreg);
+}
+
+uint8_t DS3234_get_sreg(const uint8_t pin)
+{
+    uint8_t rv;
+    rv = DS3234_get_addr(pin, 0x0f);
+    return rv;
+}
+
+void DS3234_clear_a2f(const uint8_t pin)
+{
+    uint8_t reg_val;
+
+    reg_val = DS3234_get_sreg(pin) & ~DS3234_A2F;
+    DS3234_set_sreg(pin, reg_val);
+}
+
+// END WEIRD FUNCTION DUMP
+//////////////////////////////////////////////////////
+
+void set_next_alarm(void)
+{
   
-  // When awake, disable sleep mode and turn on all devices.
-  sleep_disable();
-  power_all_enable();
+    DateTime now = RTC.now();
+    unsigned char wakeup_min;
+    unsigned char wakeup_hour;
+    
+
+    // calculate the minute when the next alarm will be triggered
+    wakeup_min = now.minute();
+
+    //calculate the hour when the next alarm will be triggered
+    wakeup_hour = now.hour() + sleep_period;
+    if (wakeup_hour > 23) {
+        wakeup_hour -= 24;
+    }
+
+    // flags define what calendar component to be checked against the current time in order
+    // to trigger the alarm
+    // A2M2 (minutes) (0 to enable, 1 to disable)
+    // A2M3 (hour)    (0 to enable, 1 to disable) 
+    // A2M4 (day)     (0 to enable, 1 to disable)
+    // DY/DT          (dayofweek == 1/dayofmonth == 0)
+    uint8_t flags[4] = { 0, 0, 1, 1 };
+
+    // set Alarm2. only the minute is set since we ignore the hour and day component
+    DS3234_set_a2(timePin, wakeup_min, wakeup_hour, 0, flags);
+
+    // activate Alarm2
+    DS3234_set_creg(timePin, DS3234_INTCN | DS3234_A2IE);
+    
+}
+
+void INT0_ISR(void)
+{
+  //detach interrupt and set time_interrupt=1
+  //interrupt must be attached again
+  detachInterrupt(0);
+  time_interrupt=1;
+
 }
 
 void logSensorReading() {
@@ -85,82 +172,62 @@ void logSensorReading() {
   }
 }
 
-
 void setup()
 {
-  // Open serial communications and wait for port to open:
-  Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for Leonardo only
-  }
-  SPI.begin();
-  RTC.begin();
+    Serial.begin(9600);
+    Serial.println("Entering setup");
 
-  Serial.print("Initializing SD card...");
+    SPI.begin();
+    RTC.begin();
+    
+    Serial.print("Initializing SD card...");
+    // see if the card is present and can be initialized:
+    if (!SD.begin(chipSelect)) {
+      Serial.println("Card failed, or not present");
+      // don't do anything more:
+      return;
+    }
+    Serial.println("card initialized.");
 
-  // see if the card is present and can be initialized:
-  if (!SD.begin(chipSelect)) {
-    Serial.println("Card failed, or not present");
-    // don't do anything more:
-    return;
-  }
-  
-  Serial.println("SD card initialized.");
- 
-  // Setup the watchdog timer to run an interrupt which
-  // wakes the Arduino from sleep every 8 seconds.
-  
-  // Note that the default behavior of resetting the Arduino
-  // with the watchdog will be disabled.
-  
-  // This next section of code is timing critical, so interrupts are disabled.
-  // See more details of how to change the watchdog in the ATmega328P datasheet
-  // around page 50, Watchdog Timer.
-  noInterrupts();
-  
-  // Set the watchdog reset bit in the MCU status register to 0.
-  MCUSR &= ~(1<<WDRF);
-  
-  // Set WDCE and WDE bits in the watchdog control register.
-  WDTCSR |= (1<<WDCE) | (1<<WDE);
+    pinMode(2, INPUT);
+    delay(5000);
 
-  // Set watchdog clock prescaler bits to a value of 8 seconds.
-  WDTCSR = (1<<WDP0) | (1<<WDP3);
-  
-  // Enable watchdog as interrupt only (no reset).
-  WDTCSR |= (1<<WDIE);
-  
-  // Enable interrupts again.
-  interrupts();
-  
-  Serial.println(F("Setup complete."));
+    DS3234_clear_a2f(timePin);
+    set_next_alarm();
+    attachInterrupt(0, INT0_ISR, LOW);
 }
+
 
 void loop()
 {
-  // Don't do anything unless the watchdog timer interrupt has fired.
-  if (watchdogActivated)
-  {
-    watchdogActivated = false;
-    // Increase the count of sleep iterations and take a sensor
-    // reading once the max number of iterations has been hit.
-    sleepIterations += 1;
-    if (sleepIterations >= MAX_SLEEP_ITERATIONS) {
-      // Reset the number of sleep iterations.
-      sleepIterations = 0;
-      // Log the sensor data
-      logSensorReading();
+  if(time_interrupt==1){
+    Serial.println(" time_interrupt==1");
+    time_interrupt=0;
+    
+    // set next alarm
+    set_next_alarm();
+    // clear a2 alarm flag and let INT go into hi-z
+    DS3234_clear_a2f(timePin);
+    //Attach interrupt again
+    attachInterrupt(0, INT0_ISR, LOW);
+    
+    if (energy.WasSleeping()){
+        Serial.println("  Interrupt and was sleeping");
+        logSensorReading();
     }
-  } 
-  // Go to sleep!
-  sleep();
+    else
+    {
+        /*
+        The IRQ happened in awake state.
+        This code is for the "normal" ISR.
+        */
+        Serial.println("  Interrupt and was NOT sleeping");
+    }
+  }
+  Serial.println("Entering loop");
+  delay(1000);
+
+  Serial.println("Powering down");
+  energy.PowerDown();
+
 }
-
-
-
-
-
-
-
-
-
