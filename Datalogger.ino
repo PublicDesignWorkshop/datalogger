@@ -1,12 +1,11 @@
 #include <SPI.h>
-
 #include <SD.h>           //For SD
 #include <Wire.h>
 
-#include <RTClib.h>
+#include <RTClib.h>       //For RTC
 #include <RTC_DS3234.h>
 
-#include "Enerlib.h"      //for Power management
+#include "Enerlib.h"      //For Power management
 
 #define BUFF_MAX 256
 
@@ -94,7 +93,6 @@ void DS3234_clear_a2f(const uint8_t pin){
 //////////////////////////////////////////////////////
 
 void set_next_alarm(void){
-  
     DateTime now = RTC.now();
     unsigned char wakeup_min;
     unsigned char wakeup_hour;
