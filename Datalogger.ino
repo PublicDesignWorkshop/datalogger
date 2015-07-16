@@ -1,10 +1,8 @@
 #include <SPI.h>
 #include <SD.h>           //For SD
 #include <Wire.h>
-
 #include <RTClib.h>       //For RTC
 #include <RTC_DS3234.h>
-
 #include "Enerlib.h"      //For Power management
 
 #define BUFF_MAX 256
