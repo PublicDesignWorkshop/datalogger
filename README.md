@@ -25,6 +25,6 @@ The *sleep* branch uses the Arduino's internal watchdog timer to shut it down an
 Here, sleeping is handled manually.
 
 ##Interrupt branch
-the *interrupt* branch uses the alarm capability of the DS3234 to schedule when it should awaken from sleep. It sends a signal from SQW to an interrupt pin while the microcontroller is completely asleep. The MCU wakes up, logs data, and goes back to sleep.
+the *interrupt* branch uses the alarm capability of the DS3234 to schedule when it should awaken from sleep. It sends a signal from SQW to an interrupt pin while the microcontroller is completely asleep. The MCU wakes up, logs data, and goes back to sleep, which is handled by the Enerlib library. There is a big pile of crap called "FUNCTIONS FROM OTHER RTC LIBRARY TO CLEAN UP" that is all of the dependencies from the DS3234 library that I added to make the alarms work. It's an ugly kludge at the moment. 
 
-Here, the enerlib library handles sleep.
+Generally, this is the interesting stuff: the other branches were waypoints towards this goal.
